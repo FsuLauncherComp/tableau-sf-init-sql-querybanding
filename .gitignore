@@ -1,0 +1,6 @@
+/.vscode
+.env
+.venv
+logs.log
+content/*
+archive.py
