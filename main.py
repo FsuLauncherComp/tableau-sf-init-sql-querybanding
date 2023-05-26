@@ -188,7 +188,11 @@ def add_workbook_tag(server: TSC.Server, wb: TSC.WorkbookItem, tag: str) -> None
     """
     logger.info(f"Adding tag {tag} to workbook {wb.name}")
     wb.tags.add(tag)
-    server.workbooks.update(wb)
+    try:
+        server.workbooks.update(wb)
+    except Exception as e:
+        logger.error(f"Error adding tag {tag} to workbook {wb.name}")
+        logger.error(e)
     return wb.tags
 
 def main():
