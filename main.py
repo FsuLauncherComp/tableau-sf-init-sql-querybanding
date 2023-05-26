@@ -1,6 +1,8 @@
 import os
 from typing import Tuple
 import logging
+import json
+import datetime
 
 from dotenv import load_dotenv
 from tableaudocumentapi import Workbook, Datasource
@@ -65,24 +67,37 @@ def download_resource(
     return downloaded_resource
 
 
-def get_workbooks_less_than_size(server: TSC.Server, size: int) -> TSC.Pager:
+def get_workbooks_from_config(server: TSC.Server) -> TSC.Pager:
     """
     Get workbooks less than a certain size
     :param server: Tableau Server
     :param size: Size in megabytes
     :return: Workbooks less than a certain size
     """
+    with open("workbook_config.json") as f:
+        config = json.load(f)
+    
+    size = config["content_size"]
+    date_checkpoint = config["date_checkpoint"]
+
     size_to_bytes = size * 1024 * 1024
     logger.info(f"Getting workbooks less than {size}mb")
-    filter_to_size = TSC.RequestOptions()
-    filter_to_size.filter.add(
+    req_opts = TSC.RequestOptions()
+    req_opts.filter.add(
         TSC.Filter(
             "size",
             TSC.RequestOptions.Operator.LessThanOrEqual,
             size_to_bytes,
         )
     )
-    workbooks = TSC.Pager(server.workbooks, request_opts=filter_to_size)
+    req_opts.filter.add(
+        TSC.Filter(
+            "updatedAt",
+            TSC.RequestOptions.Operator.GreaterThanOrEqual,
+            date_checkpoint,
+        )
+    )
+    workbooks = TSC.Pager(server.workbooks, request_opts=req_opts)
     return workbooks
 
 
@@ -134,6 +149,26 @@ def filter_wbs_with_snowflake_connections(
     return wbs_with_sf_connections
 
 
+def update_workbook_config_with_date_checkpoint() -> str:
+    """
+    Update workbook config with date checkpoint
+    """
+    logger.info("Updating workbook config with date checkpoint")
+    with open("workbook_config.json") as f:
+        config = json.load(f)
+
+    # Get the current date and time
+    now = datetime.datetime.now()
+
+    # Format to match 2020-12-31T00:00:00Z
+    formatted_date = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    config["date_checkpoint"] = formatted_date
+
+    with open("workbook_config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
+    return formatted_date
 
 def init_sql_has_query_tag(init_sql: str) -> bool:
     """
@@ -170,8 +205,8 @@ def main():
         site_id=os.getenv("SITE_ID"),
     )
 
-    # Get workbooks less than 10MB
-    workbooks_to_check = get_workbooks_less_than_size(server=server, size=10)
+    # Get workbooks based on config settings
+    workbooks_to_check = get_workbooks_from_config(server=server)
 
     # Filter to workbooks with Snowflake connections
     wbs_with_sf_connections = filter_wbs_with_snowflake_connections(
@@ -199,9 +234,13 @@ def main():
                 logger.info(f"Query tag not found for connection - {connection_dbname}")
                 query_tag_count += 1
         if query_tag_count > 0:
-            add_wb_tag = add_workbook_tag(server=server, wb=wb, tag=TABLEAU_TAG)
+            updated_wb_tags = add_workbook_tag(server=server, wb=wb, tag=TABLEAU_TAG)
+            logger.info(f"Updated workbook tags - {updated_wb_tags}")
 
         os.remove(resource_filename)
+
+    updated_config_date = update_workbook_config_with_date_checkpoint()
+    logger.info(f"Updated config date - {updated_config_date}")
 
 if __name__ == "__main__":
     load_dotenv()
